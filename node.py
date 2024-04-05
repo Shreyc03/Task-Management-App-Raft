@@ -1,7 +1,6 @@
 import threading
 import time
 import utils
-from config import cfg
 
 FOLLOWER = 0
 CANDIDATE = 1

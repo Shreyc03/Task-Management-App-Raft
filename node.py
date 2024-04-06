@@ -32,7 +32,7 @@ class Node():
 
     def startElection(self):
         self.term += 1
-        self.voteCount = 0
+        self.voteCount = 1
         self.status = CANDIDATE
         self.init_timeout()
         self.incrementVote()

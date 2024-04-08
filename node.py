@@ -18,7 +18,7 @@ class Node():
         self.staged = None
         self.term = 0
         self.status = FOLLOWER
-        self.majority = ((len(self.fellow) + 1) // 2) + 1
+        self.majority = (len(self.fellow) // 2) + 1
         self.voteCount = 0
         self.commitIdx = 0
         self.timeout_thread = None
@@ -33,7 +33,7 @@ class Node():
 
     def startElection(self):
         self.term += 1
-        self.voteCount = 0
+        self.voteCount = 1
         self.status = CANDIDATE
         self.init_timeout()
         self.incrementVote()

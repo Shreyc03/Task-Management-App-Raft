@@ -2,17 +2,18 @@ import threading
 import time
 import utils
 from utils import cfg
+import mysql.connector
 
 FOLLOWER = 0
 CANDIDATE = 1
 LEADER = 2
-
+                               
 class Node():
     def __init__(self, fellow, my_ip):
         self.addr = my_ip
         self.fellow = fellow
         self.lock = threading.Lock()
-        self.DB = {}
+        self.mydb = mysql.connector.connect(host="localhost", user="root", password="Bhagya@76", database="task")
         self.log = []
         self.staged = None
         self.term = 0
@@ -141,13 +142,13 @@ class Node():
                 elif self.commitIdx <= msg["commitIdx"]:
                     if not self.staged:
                         self.staged = msg["payload"]
-                    self.commit()
+                    # self.commit()
 
         return self.term, self.commitIdx
 
     def init_timeout(self):
         self.reset_timeout()
-        if self.timeout_thread and self.timeout_thread.isAlive():
+        if self.timeout_thread and self.timeout_thread.is_alive():
             return
         self.timeout_thread = threading.Thread(target=self.timeout_loop)
         self.timeout_thread.start()
@@ -163,11 +164,56 @@ class Node():
     def handle_get(self, payload):
         print("getting", payload)
         key = payload["key"]
-        if key in self.DB:
-            payload["value"] = self.DB[key]
-            return payload
-        else:
-            return None
+        if key == "login":
+            username = payload["username"]
+            password = payload["password"]
+                
+            with self.mydb.cursor() as cursor:
+                sql_check = "SELECT COUNT(*) FROM users WHERE username = %s and password_hash = %s"
+                cursor.execute(sql_check, (username,password,))
+                result = cursor.fetchone()
+                if result[0] == 0:
+                    return -1
+                else:
+                    return "User Exists"
+                
+        if key == "view":
+            username = payload["username"]
+            with self.mydb.cursor() as cursor:
+                sql_check = "SELECT user_id FROM users WHERE username = %s"
+                cursor.execute(sql_check, (username,))
+                result = cursor.fetchone()
+                sql = "SELECT task_id, title, description, due_date, priority, status, created_at, updated_at FROM tasks WHERE user_id = %s"
+                cursor.execute(sql, (result[0],))
+                data = cursor.fetchall()
+                print(data)
+                return data
+            
+        if key == "view_names":
+            username = payload["username"]
+            with self.mydb.cursor() as cursor:
+                sql_check = "SELECT user_id FROM users WHERE username = %s"
+                cursor.execute(sql_check, (username,))
+                result = cursor.fetchone()
+                sql = "SELECT title FROM tasks WHERE user_id = %s"
+                cursor.execute(sql, (result[0],))
+                data = cursor.fetchall()
+                print(data)
+                return data
+            
+        if key == "get_tasks":
+            username = payload["username"]
+            task = payload["task"]
+            with self.mydb.cursor() as cursor:
+                sql_check = "SELECT user_id FROM users WHERE username = %s"
+                cursor.execute(sql_check, (username,))
+                result = cursor.fetchone()
+                sql = "SELECT * FROM tasks WHERE title = %s AND user_id = %s"
+                cursor.execute(sql, (task, result[0],))
+                data = cursor.fetchall()
+                print(data)
+                return data
+        return -1
 
     def spread_update(self, message, confirmations=None, lock=None):
         for i, each in enumerate(self.fellow):
@@ -209,16 +255,78 @@ class Node():
             "action": "commit",
             "commitIdx": self.commitIdx
         }
-        self.commit()
+        r = self.commit()
         threading.Thread(target=self.spread_update,
                          args=(commit_message, None, self.lock)).start()
         print("majority reached, replied to client, sending message to commit")
-        return True
+        return r
 
     def commit(self):
         self.commitIdx += 1
         self.log.append(self.staged)
         key = self.staged["key"]
-        value = self.staged["value"]
-        self.DB[key] = value
+
+        if key == "register":
+            username = self.staged["username"]
+            password = self.staged["password"]
+            email = self.staged["email"]
+                
+            with self.mydb.cursor() as cursor:
+                sql_check = "SELECT COUNT(*) FROM users WHERE username = %s"
+                cursor.execute(sql_check, (username,))
+                result = cursor.fetchone()
+                if result[0] > 0:
+                    return -1
+                sql = "INSERT IGNORE INTO users (username, password_hash, email) VALUES (%s, %s, %s)"
+                cursor.execute(sql, (username, password, email))
+
+            self.mydb.commit()
+
+        if key == "add":
+            username = self.staged["username"]
+            task_name = self.staged["task_name"]
+            due_date = self.staged["due_date"]
+            priority = self.staged["priority"]
+            status = self.staged["status"]
+            description = self.staged["description"]
+                
+            with self.mydb.cursor() as cursor:
+                sql_check = "SELECT user_id FROM users WHERE username = %s"
+                cursor.execute(sql_check, (username,))
+                result = cursor.fetchone()
+                sql = "INSERT IGNORE INTO tasks (user_id, title, description, due_date, priority, status) VALUES (%s, %s, %s, %s, %s, %s)"
+                cursor.execute(sql, (result[0], task_name, description, due_date, priority, status))
+            self.mydb.commit()
+        
+        if key == "delete":
+            username = self.staged["username"]
+            task_name = self.staged["task"]
+            with self.mydb.cursor() as cursor:
+                sql_check = "SELECT user_id FROM users WHERE username = %s"
+                cursor.execute(sql_check, (username,))
+                result = cursor.fetchone()
+                sql = "DELETE FROM tasks WHERE title = %s and user_id = %s"
+                cursor.execute(sql, (task_name, result[0],))
+            self.mydb.commit()
+        
+        if key == "update":
+            username = self.staged["username"]
+            t= self.staged["t"]
+            p = self.staged["p"]
+            s = self.staged["s"]
+            d = self.staged["d"]
+            nt= self.staged["nt"]
+            np = self.staged["np"]
+            ns = self.staged["ns"]
+            nd = self.staged["nd"]
+
+            with self.mydb.cursor() as cursor:
+                sql_check = "SELECT user_id FROM users WHERE username = %s"
+                cursor.execute(sql_check, (username,))
+                result = cursor.fetchone()
+                sql = "UPDATE tasks SET title = %s, description = %s, priority = %s, status = %s WHERE user_id = %s AND title = %s AND description = %s AND priority = %s AND status = %s"
+                cursor.execute(sql, (nt, nd, np, ns, result[0], t, d, p, s))
+            self.mydb.commit()
+            
         self.staged = None
+        return 1
